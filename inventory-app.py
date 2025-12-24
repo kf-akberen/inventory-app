@@ -7,123 +7,143 @@ import json
 
 # --- КОНФИГУРАЦИЯ ---
 SHEET_NAME = "inventory_db" 
-# Задайте ваши данные для входа здесь
 USER_LOGIN = "admin"
-USER_PASSWORD = "it_admin_password" # Измените на свой
+USER_PASSWORD = "123" # Смените на свой
 
-LOCATIONS = [
-    "Офис (Кызылорда)", "Склад", "Ремонт/Заправка",
-    "Месторождение «Ак Берен»", "Месторождение «Кумколь»", "Месторождение «Арыскум»",
-    "Месторождение «Акыртобе, Полторацкое»", "Месторождение «Амангельды»",
-    "Месторождение «Акшабулак»", "Месторождение «Бектас и Коныс»"
-]
+LOCATIONS = ["Офис (Кызылорда)", "Склад", "Ремонт", "Ак Берен", "Кумколь", "Арыскум", "Амангельды"]
+TYPES = ["Картридж", "Мышь", "Клавиатура", "Монитор", "Принтер", "МФУ", "Ноутбук"]
 
-TYPES = ["Картридж", "Мышь", "Клавиатура", "Монитор", "Принтер", "МФУ", "Ноутбук", "Прочее"]
+# --- СТИЛИЗАЦИЯ ПОД МОБИЛКУ ---
+def local_css():
+    st.markdown("""
+        <style>
+        /* Общий фон */
+        .stApp { background-color: #0E1117; }
+        
+        /* Кнопки на весь экран */
+        div.stButton > button:first-child {
+            width: 100%;
+            border-radius: 10px;
+            height: 3em;
+            background-color: #2E7D32;
+            border: none;
+            font-weight: bold;
+        }
+        
+        /* Карточки для Дашборда */
+        .inventory-card {
+            background-color: #1E1E1E;
+            padding: 15px;
+            border-radius: 12px;
+            border-left: 5px solid #4CAF50;
+            margin-bottom: 10px;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        .card-title { color: #FFFFFF; font-size: 18px; font-weight: bold; }
+        .card-subtitle { color: #AAAAAA; font-size: 14px; }
+        .card-tag { 
+            background: #333; padding: 2px 8px; border-radius: 5px; 
+            font-size: 12px; color: #4CAF50; border: 1px solid #4CAF50;
+        }
 
-# --- ПОДКЛЮЧЕНИЕ ---
+        /* Прячем лишние элементы интерфейса Streamlit на мобилках */
+        header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        .block-container {padding-top: 1rem; padding-bottom: 1rem;}
+        </style>
+    """, unsafe_allow_html=True)
+
+# --- ЛОГИКА ПОДКЛЮЧЕНИЯ ---
 def connect_to_gsheets():
     key_dict = json.loads(st.secrets["textkey"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
-    client = gspread.authorize(creds)
-    return client.open(SHEET_NAME)
+    return gspread.authorize(creds).open(SHEET_NAME)
 
-# --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
-def get_items():
+def add_log(action, details):
     sh = connect_to_gsheets()
-    return pd.DataFrame(sh.worksheet("items").get_all_records())
+    ws = sh.worksheet("history")
+    ws.append_row([len(ws.col_values(1)), datetime.now().strftime("%d.%m %H:%M"), st.session_state.username, action, details])
 
-def add_log(action_type, details):
-    """Записывает действие пользователя в лист истории"""
-    sh = connect_to_gsheets()
-    ws_hist = sh.worksheet("history")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    user = st.session_state.get("username", "Unknown")
-    ws_hist.append_row([len(ws_hist.col_values(1)), timestamp, user, action_type, details])
+# --- ИНТЕРФЕЙС ---
+st.set_page_config(page_title="AkBeren IT", layout="centered")
+local_css()
 
-def add_item(name, item_type, serial, specs, location, status):
-    sh = connect_to_gsheets()
-    ws = sh.worksheet("items")
-    new_id = len(ws.col_values(1))
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append_row([new_id, name, item_type, str(serial), str(specs), location, status, created_at])
-    add_log("ДОБАВЛЕНИЕ", f"Добавлен {name} (SN: {serial}) в {location}")
-    st.success(f"✅ Добавлено: {name}")
+if "auth" not in st.session_state: st.session_state.auth = False
 
-def move_item(item_id, new_location, comment):
-    sh = connect_to_gsheets()
-    ws_items = sh.worksheet("items")
-    cell = ws_items.find(str(item_id))
-    if cell:
-        row = cell.row
-        name = ws_items.cell(row, 2).value
-        old_loc = ws_items.cell(row, 6).value
-        ws_items.update_cell(row, 6, new_location)
-        add_log("ПЕРЕМЕЩЕНИЕ", f"{name} перемещен из {old_loc} в {new_location}. Коммент: {comment}")
-        st.success(f"🚚 {name} успешно перемещен!")
-
-# --- СИСТЕМА АВТОРИЗАЦИИ ---
-def check_password():
-    """Возвращает True, если пароль верный"""
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if not st.session_state["authenticated"]:
-        st.title("🔐 Вход в систему")
-        login = st.text_input("Логин")
-        password = st.text_input("Пароль", type="password")
-        if st.button("Войти"):
-            if login == USER_LOGIN and password == USER_PASSWORD:
-                st.session_state["authenticated"] = True
-                st.session_state["username"] = login
+if not st.session_state.auth:
+    st.markdown("<h2 style='text-align: center;'>🔐 IT Inventory</h2>", unsafe_allow_html=True)
+    with st.container():
+        l = st.text_input("Логин")
+        p = st.text_input("Пароль", type="password")
+        if st.button("ВОЙТИ"):
+            if l == USER_LOGIN and p == USER_PASSWORD:
+                st.session_state.auth = True
+                st.session_state.username = l
                 st.rerun()
-            else:
-                st.error("❌ Неверный логин или пароль")
-        return False
-    return True
+            else: st.error("Ошибка входа")
+else:
+    # Мобильное меню вверху вместо боковой панели
+    menu = st.selectbox("📌 Раздел", ["📱 Склад", "➕ Добавить", "🚚 Переместить", "📜 Логи"])
 
-# --- ГЛАВНЫЙ ИНТЕРФЕЙС ---
-st.set_page_config(page_title="Cloud Inventory", layout="wide")
-
-if check_password():
-    st.title("📦 IT Учет: Ак Берен (Защищенный)")
-    
-    menu = st.sidebar.radio("Меню", ["Дашборд", "Переместить", "Добавить новое", "Логи (История)"])
-
-    if menu == "Дашборд":
-        df = get_items()
+    if menu == "📱 Склад":
+        sh = connect_to_gsheets()
+        df = pd.DataFrame(sh.worksheet("items").get_all_records())
+        
+        search = st.text_input("🔍 Поиск по S/N или названию")
+        
         if not df.empty:
-            st.subheader("Текущее оборудование")
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.info("Таблица пуста.")
+            if search:
+                df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+            
+            for _, row in df.iloc[::-1].iterrows():
+                st.markdown(f"""
+                <div class="inventory-card">
+                    <div class="card-title">{row['name']}</div>
+                    <div class="card-subtitle">S/N: {row['serial_number']}</div>
+                    <div style="margin-top:8px;">
+                        <span class="card-tag">{row['location']}</span>
+                        <span class="card-tag" style="color:#FFA000; border-color:#FFA000;">{row['status']}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-    elif menu == "Добавить новое":
-        with st.form("add"):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("Модель")
-            type_ = c1.selectbox("Тип", TYPES)
-            sn = c1.text_input("S/N")
-            loc = c2.selectbox("Где", LOCATIONS)
-            stat = c2.selectbox("Статус", ["Новый", "Рабочий", "Ремонт"])
-            inf = c2.text_input("Инфо")
-            if st.form_submit_button("Сохранить"):
-                add_item(name, type_, sn, inf, loc, stat)
+    elif menu == "➕ Добавить":
+        with st.form("add_form", clear_on_submit=True):
+            st.subheader("Новое устройство")
+            n = st.text_input("Модель / Название")
+            t = st.selectbox("Тип", TYPES)
+            sn = st.text_input("Серийный номер")
+            loc = st.selectbox("Локация", LOCATIONS)
+            if st.form_submit_button("СОХРАНИТЬ"):
+                ws = connect_to_gsheets().worksheet("items")
+                ws.append_row([len(ws.col_values(1)), n, t, sn, "", loc, "Новый", datetime.now().strftime("%Y-%m-%d")])
+                add_log("ДОБАВЛЕНИЕ", f"{n} ({sn})")
+                st.success("Готово!")
 
-    elif menu == "Переместить":
-        df = get_items()
+    elif menu == "🚚 Переместить":
+        sh = connect_to_gsheets()
+        df = pd.DataFrame(sh.worksheet("items").get_all_records())
         if not df.empty:
-            opts = df.apply(lambda x: f"{x['id']} | {x['name']} ({x['location']})", axis=1).tolist()
-            sel = st.selectbox("Что перемещаем?", opts)
-            with st.form("move"):
-                to_loc = st.selectbox("Куда", LOCATIONS)
-                comm = st.text_input("Комментарий")
-                if st.form_submit_button("Подтвердить"):
-                    move_item(sel.split(" | ")[0], to_loc, comm)
+            item_map = {f"{r['id']} | {r['name']}": r['id'] for _, r in df.iterrows()}
+            selected = st.selectbox("Выберите устройство", list(item_map.keys()))
+            to_loc = st.selectbox("Куда переместить", LOCATIONS)
+            comm = st.text_input("Комментарий")
+            if st.button("ПОДТВЕРДИТЬ ПЕРЕМЕЩЕНИЕ"):
+                ws = sh.worksheet("items")
+                cell = ws.find(str(item_map[selected]))
+                ws.update_cell(cell.row, 6, to_loc)
+                add_log("ПЕРЕМЕЩЕНИЕ", f"ID {item_map[selected]} -> {to_loc} ({comm})")
+                st.success("Местоположение обновлено!")
 
-    elif menu == "Логи (История)":
-        st.subheader("📜 Журнал действий пользователей")
+    elif menu == "📜 Логи":
+        st.subheader("История действий")
         sh = connect_to_gsheets()
         log_df = pd.DataFrame(sh.worksheet("history").get_all_records())
-        if not log_df.empty:
-            st.dataframe(log_df.iloc[::-1], use_container_width=True) # Показываем свежие записи сверху
+        st.write(log_df.iloc[::-1])
+
+    if st.sidebar.button("Выход"):
+        st.session_state.auth = False
+        st.rerun()
